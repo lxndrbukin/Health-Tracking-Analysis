@@ -1,10 +1,10 @@
+from typing import override
 from google_auth_oauthlib.flow import InstalledAppFlow
+from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request
 from dotenv import load_dotenv
-import json
 import os
 import socket
-import requests
-import time
 import urllib3.util.connection as urllib3_cn
 
 def allowed_gai_family():
@@ -20,47 +20,43 @@ SCOPES = [
     'https://www.googleapis.com/auth/fitness.sleep.read',
 ]
 
-client_config = {
-    "installed": {
-        "client_id": os.getenv('GOOGLE_CLIENT_ID'),
-        "client_secret": os.getenv('GOOGLE_CLIENT_SECRET'),
-        "redirect_uris": ["http://127.0.0.1:8080/"],
-        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-        "token_uri": "https://oauth2.googleapis.com/token"
+def get_credentials():
+    if os.path.exists('auth/token.json'):
+        creds = Credentials.from_authorized_user_file('auth/token.json', SCOPES)
+        if creds and creds.valid:
+            return creds
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+            with open('auth/token.json', 'w') as f:
+                f.write(creds.to_json())
+            return creds
+    return None
+
+def main():
+    creds = get_credentials()
+    if creds:
+        print("Using existing token")
+        return
+
+    client_config = {
+        "installed": {
+            "client_id": os.getenv('GOOGLE_CLIENT_ID'),
+            "client_secret": os.getenv('GOOGLE_CLIENT_SECRET'),
+            "redirect_uris": ["http://127.0.0.1:8080/"],
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token"
+        }
     }
-}
 
-flow = InstalledAppFlow.from_client_config(client_config, SCOPES)
-creds = flow.run_local_server(host='127.0.0.1', port=8080)
+    flow = InstalledAppFlow.from_client_config(client_config, SCOPES)
+    creds = flow.run_local_server(host='127.0.0.1', port=8080)
 
-with open('token.json', 'w') as f:
-    f.write(creds.to_json())
+    os.makedirs('auth', exist_ok=True)
 
-print("Done — token.json saved")
+    with open('auth/token.json', 'w') as f:
+        f.write(creds.to_json())
 
+    print("Done — token.json saved")
 
-now_ms = int(time.time() * 1000)
-start_ms = now_ms - (24 * 60 * 60 * 1000)
-
-with open('token.json') as f:
-    token = json.load(f)['token']
-    
-
-headers = {'Authorization': f'Bearer {token}'}
-
-steps_source_id = 'raw:com.google.step_count.delta:com.fitbit.FitbitMobile:health_platform'
-hr_source_id = 'raw:com.google.heart_rate.bpm:com.fitbit.FitbitMobile:health_platform'
-
-start_ns = start_ms * 1_000_000
-end_ns = now_ms * 1_000_000
-dataset_id = f'{start_ns}-{end_ns}'
-
-steps_url = f'https://www.googleapis.com/fitness/v1/users/me/dataSources/{steps_source_id}/datasets/{dataset_id}'
-steps_resp = requests.get(steps_url, headers=headers)
-with open('steps_data.json', 'w') as f:
-    json.dump(steps_resp.json(), f, indent=4)
-
-hr_url = f'https://www.googleapis.com/fitness/v1/users/me/dataSources/{hr_source_id}/datasets/{dataset_id}'
-hr_resp = requests.get(hr_url, headers=headers)
-with open('heart_rate_data.json', 'w') as f:
-    json.dump(hr_resp.json(), f, indent=4)
+if __name__ == '__main__':
+    main()
